@@ -15,21 +15,16 @@ import {
 // ======================================================
 
 const firebaseConfig = {
-
-    apiKey: "BURAYA_API_KEY",
-
-    authDomain: "BURAYA_AUTH_DOMAIN",
-
-    databaseURL: "BURAYA_DATABASE_URL",
-
-    projectId: "BURAYA_PROJECT_ID",
-
-    storageBucket: "BURAYA_STORAGE_BUCKET",
-
-    messagingSenderId: "BURAYA_MESSAGING_SENDER_ID",
-
-    appId: "BURAYA_APP_ID"
-
+  apiKey: "AIzaSyBF4A5AGYcR0eb5ZsuEiUG-Gg9Vfr119yg",
+  authDomain: "kelime-oyunu-57a0b.firebaseapp.com",
+    
+  databaseURL: "https://kelime-oyunu-57a0b-default-rtdb.firebaseio.com",
+    
+  projectId: "kelime-oyunu-57a0b",
+  storageBucket: "kelime-oyunu-57a0b.firebasestorage.app",
+  messagingSenderId: "580383166978",
+  appId: "1:580383166978:web:f0d428220ab83e33bb4d1b",
+  measurementId: "G-PKEB0K17PX"
 };
 
 
