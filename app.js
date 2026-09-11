@@ -1,539 +1,63 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
+import { getDatabase, ref, set, get, onValue, update } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-database.js";
 
-import {
-    getDatabase,
-    ref,
-    set,
-    get,
-    onValue,
-    update
-} from "https://www.gstatic.com/firebasejs/12.18.0/firebase-database.js";
+const firebaseConfig = { apiKey:"AIzaSyBF4A5AGcR0eb5ZsuEiUG-Gg9Vfr119yg", authDomain:"kelime-oyunu-57a0b.firebaseapp.com", databaseURL:"https://kelime-oyunu-57a0b-default-rtdb.firebaseio.com", projectId:"kelime-oyunu-57a0b", storageBucket:"kelime-oyunu-57a0b.firebasestorage.app", messagingSenderId:"580383166978", appId:"1:580383166978:web:f0d428220ab83e33bb4d1b", measurementId:"G-PKEB0K17PX" };
+const db = getDatabase(initializeApp(firebaseConfig));
 
+let roomId=null, playerNumber=null, currentRound=1, timerInterval=null, secondsLeft=30, gameFinished=false;
+const $=id=>document.getElementById(id);
+const menu=$("menu"), waiting=$("waiting"), game=$("game"), result=$("result");
+const nameInput=$("nameInput"), roomInput=$("roomInput"), roomCodeDisplay=$("roomCodeDisplay"), waitingText=$("waitingText");
+const wordInput=$("wordInput"), status=$("status"), roundNumber=$("roundNumber"), word1=$("word1"), word2=$("word2");
+const player1Name=$("player1Name"), player2Name=$("player2Name"), score1=$("score1"), score2=$("score2");
+const timerEl=$("timer"), words=$("words"), resultTitle=$("resultTitle"), resultText=$("resultText"), finalScores=$("finalScores");
 
-// ======================================================
-// FIREBASE AYARLARI
-// ======================================================
+function generateRoomCode(){ const chars="ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; return Array.from({length:6},()=>chars[Math.floor(Math.random()*chars.length)]).join(""); }
+function cleanWord(w){ return w.trim().toLocaleLowerCase("tr-TR"); }
+function roomLink(){ return `${location.origin}${location.pathname}?room=${roomId}`; }
+function playerPath(){ return playerNumber===1?"player1":"player2"; }
+function playTone(type="click") { try { const C=window.AudioContext||window.webkitAudioContext; if(!C)return; const c=new C(),o=c.createOscillator(),g=c.createGain(); o.frequency.value=type==="success"?720:type==="error"?180:420; g.gain.value=.045; o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+.12); } catch(e){} }
+function setStatus(text){ status.textContent=text; }
+function stopTimer(){ if(timerInterval){clearInterval(timerInterval);timerInterval=null;} }
+function startTimer(){ stopTimer(); secondsLeft=30; timerEl.textContent=secondsLeft; timerInterval=setInterval(async()=>{ secondsLeft--; timerEl.textContent=secondsLeft; if(secondsLeft<=5) timerEl.classList.add("timer-warning"); if(secondsLeft<=0){ stopTimer(); timerEl.classList.remove("timer-warning"); setStatus("⏰ Süre doldu!"); await submitCurrentWord("pas"); } },1000); }
+function resetTimerStyle(){ timerEl.classList.remove("timer-warning"); }
 
-const firebaseConfig = {
-  apiKey: "AIzaSyBF4A5AGYcR0eb5ZsuEiUG-Gg9Vfr119yg",
-  authDomain: "kelime-oyunu-57a0b.firebaseapp.com",
-    
-  databaseURL: "https://kelime-oyunu-57a0b-default-rtdb.firebaseio.com",
-    
-  projectId: "kelime-oyunu-57a0b",
-  storageBucket: "kelime-oyunu-57a0b.firebasestorage.app",
-  messagingSenderId: "580383166978",
-  appId: "1:580383166978:web:f0d428220ab83e33bb4d1b",
-  measurementId: "G-PKEB0K17PX"
-};
+$("createRoom").addEventListener("click",async()=>{
+ const name=nameInput.value.trim()||"Oyuncu 1"; roomId=generateRoomCode(); playerNumber=1;
+ await set(ref(db,`rooms/${roomId}`),{player1:{joined:true,name,score:0,words:{}},player2:{joined:false,name:"Oyuncu 2",score:0,words:{}},round:1,usedWords:{},finished:false});
+ menu.classList.add("hidden"); waiting.classList.remove("hidden"); roomCodeDisplay.textContent=roomId; listenToRoom();
+});
 
+async function joinRoom(code){ const snap=await get(ref(db,`rooms/${code}`)); if(!snap.exists()){alert("Bu oda bulunamadı.");return;} const r=snap.val(); if(r.player2?.joined){alert("Bu oda dolu.");return;}
+ roomId=code;playerNumber=2; const name=nameInput.value.trim()||"Oyuncu 2"; await update(ref(db,`rooms/${code}`),{"player2/joined":true,"player2/name":name}); menu.classList.add("hidden");game.classList.remove("hidden");listenToRoom(); }
+$("joinRoom").addEventListener("click",()=>{const c=roomInput.value.trim().toUpperCase(); if(!c){alert("Oda kodunu gir.");return;} joinRoom(c);});
 
-// Firebase'i başlat
+$("copyRoom").addEventListener("click",async()=>{ try{await navigator.clipboard.writeText(roomLink());setStatus("🔗 Oda linki kopyalandı!");playTone();}catch(e){alert(roomLink());} });
+$("whatsappShare").addEventListener("click",()=>{window.open(`https://wa.me/?text=${encodeURIComponent(`Kelime oyununa katıl! Oda: ${roomId}\n${roomLink()}`)}`,"_blank");});
 
-const app = initializeApp(firebaseConfig);
-
-const db = getDatabase(app);
-
-
-// ======================================================
-// DEĞİŞKENLER
-// ======================================================
-
-let roomId = null;
-
-let playerNumber = null;
-
-let currentRound = 1;
-
-
-// ======================================================
-// HTML ELEMANLARI
-// ======================================================
-
-const menu = document.getElementById("menu");
-
-const waiting = document.getElementById("waiting");
-
-const game = document.getElementById("game");
-
-const result = document.getElementById("result");
-
-const createRoomButton =
-    document.getElementById("createRoom");
-
-const joinRoomButton =
-    document.getElementById("joinRoom");
-
-const roomInput =
-    document.getElementById("roomInput");
-
-const roomCodeDisplay =
-    document.getElementById("roomCodeDisplay");
-
-const waitingText =
-    document.getElementById("waitingText");
-
-const wordInput =
-    document.getElementById("wordInput");
-
-const submitWord =
-    document.getElementById("submitWord");
-
-const status =
-    document.getElementById("status");
-
-const roundNumber =
-    document.getElementById("roundNumber");
-
-const word1 =
-    document.getElementById("word1");
-
-const word2 =
-    document.getElementById("word2");
-
-const words =
-    document.getElementById("words");
-
-const resultTitle =
-    document.getElementById("resultTitle");
-
-const resultText =
-    document.getElementById("resultText");
-
-const newGame =
-    document.getElementById("newGame");
-
-
-// ======================================================
-// ODA KODU ÜRET
-// ======================================================
-
-function generateRoomCode() {
-
-    const characters =
-        "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-
-    let code = "";
-
-    for (let i = 0; i < 6; i++) {
-
-        code += characters[
-            Math.floor(
-                Math.random() * characters.length
-            )
-        ];
-
-    }
-
-    return code;
-
+async function submitCurrentWord(word){
+ if(!roomId||!playerNumber)return; const normalized=cleanWord(word); if(!normalized)return;
+ const snap=await get(ref(db,`rooms/${roomId}`)); if(!snap.exists())return; const r=snap.val(); const used=r.usedWords||{};
+ if(used[normalized] && used[normalized]!==currentRound){ setStatus("🚫 Bu kelime daha önce kullanıldı!"); playTone("error"); return; }
+ const base=`rooms/${roomId}/${playerPath()}/words/${currentRound}`; await set(ref(db,base),word.trim()); await update(ref(db,`rooms/${roomId}/usedWords`),{[normalized]:currentRound});
+ wordInput.value=""; setStatus("✅ Kelimen kaydedildi. Diğer oyuncu bekleniyor."); playTone("success"); stopTimer(); checkNextRound();
 }
-
-
-// ======================================================
-// ODA OLUŞTUR
-// ======================================================
-
-createRoomButton.addEventListener(
-    "click",
-    async () => {
-
-        roomId = generateRoomCode();
-
-        playerNumber = 1;
-
-        const roomRef =
-            ref(db, "rooms/" + roomId);
-
-        await set(roomRef, {
-
-            player1: {
-                joined: true,
-                words: {}
-            },
-
-            player2: {
-                joined: false,
-                words: {}
-            },
-
-            round: 1,
-
-            finished: false
-
-        });
-
-
-        menu.classList.add("hidden");
-
-        waiting.classList.remove("hidden");
-
-        roomCodeDisplay.textContent = roomId;
-
-        listenToRoom();
-
-    }
-);
-
-
-// ======================================================
-// ODAYA KATIL
-// ======================================================
-
-joinRoomButton.addEventListener(
-    "click",
-    async () => {
-
-        const code =
-            roomInput.value
-                .trim()
-                .toUpperCase();
-
-        if (!code) {
-
-            alert("Oda kodunu gir.");
-
-            return;
-
-        }
-
-
-        const roomRef =
-            ref(db, "rooms/" + code);
-
-        const snapshot =
-            await get(roomRef);
-
-
-        if (!snapshot.exists()) {
-
-            alert("Bu oda bulunamadı.");
-
-            return;
-
-        }
-
-
-        const room =
-            snapshot.val();
-
-
-        if (room.player2.joined) {
-
-            alert("Bu oda dolu.");
-
-            return;
-
-        }
-
-
-        roomId = code;
-
-        playerNumber = 2;
-
-
-        await update(roomRef, {
-
-            "player2/joined": true
-
-        });
-
-
-        menu.classList.add("hidden");
-
-        game.classList.remove("hidden");
-
-        status.textContent =
-            "Oyun başladı! Kelimeni yaz.";
-
-        listenToRoom();
-
-    }
-);
-
-
-// ======================================================
-// ODAYI DİNLE
-// ======================================================
-
-function listenToRoom() {
-
-    const roomRef =
-        ref(db, "rooms/" + roomId);
-
-
-    onValue(roomRef, (snapshot) => {
-
-        const room = snapshot.val();
-
-
-        if (!room) {
-
-            return;
-
-        }
-
-
-        // İki oyuncu da geldiyse
-
-        if (
-            room.player1.joined &&
-            room.player2.joined
-        ) {
-
-            waiting.classList.add("hidden");
-
-            game.classList.remove("hidden");
-
-            status.textContent =
-                "Kelimeni yaz.";
-
-        }
-
-
-        // Tur
-
-        currentRound =
-            room.round || 1;
-
-        roundNumber.textContent =
-            currentRound;
-
-
-        // Mevcut kelimeler
-
-        const p1Words =
-            room.player1.words || {};
-
-        const p2Words =
-            room.player2.words || {};
-
-
-        const currentWord1 =
-            p1Words[currentRound] || "";
-
-        const currentWord2 =
-            p2Words[currentRound] || "";
-
-
-        // İki oyuncu da kelime girdiyse
-
-        if (
-            currentWord1 &&
-            currentWord2
-        ) {
-
-            words.classList.remove("hidden");
-
-            word1.textContent =
-                currentWord1;
-
-            word2.textContent =
-                currentWord2;
-
-
-            // Aynı kelime mi?
-
-            if (
-                currentWord1.toLowerCase() ===
-                currentWord2.toLowerCase()
-            ) {
-
-                status.textContent =
-                    "🎯 Aynı kelime!";
-
-            } else {
-
-                status.textContent =
-                    "🔄 Kelimeler farklı.";
-
-            }
-
-
-            // 5. tur bittiyse
-
-            if (currentRound >= 5) {
-
-                finishGame(
-                    currentWord1,
-                    currentWord2
-                );
-
-            }
-
-        }
-
-    });
-
-}
-
-
-// ======================================================
-// KELİME GÖNDER
-// ======================================================
-
-submitWord.addEventListener(
-    "click",
-    async () => {
-
-        const word =
-            wordInput.value.trim();
-
-
-        if (!word) {
-
-            alert("Bir kelime yaz.");
-
-            return;
-
-        }
-
-
-        if (!roomId) {
-
-            return;
-
-        }
-
-
-        const playerPath =
-            playerNumber === 1
-                ? "player1"
-                : "player2";
-
-
-        const wordRef =
-            ref(
-                db,
-                `rooms/${roomId}/${playerPath}/words/${currentRound}`
-            );
-
-
-        await set(wordRef, word);
-
-
-        wordInput.value = "";
-
-        status.textContent =
-            "Kelimen kaydedildi. Diğer oyuncu bekleniyor.";
-
-
-        // Bir sonraki tura geçişi kontrol et
-
-        setTimeout(
-            checkNextRound,
-            1000
-        );
-
-    }
-);
-
-
-// ======================================================
-// SONRAKİ TUR
-// ======================================================
-
-async function checkNextRound() {
-
-    const roomRef =
-        ref(db, "rooms/" + roomId);
-
-
-    const snapshot =
-        await get(roomRef);
-
-
-    if (!snapshot.exists()) {
-
-        return;
-
-    }
-
-
-    const room =
-        snapshot.val();
-
-
-    const p1Word =
-        room.player1.words?.[currentRound];
-
-
-    const p2Word =
-        room.player2.words?.[currentRound];
-
-
-    if (
-        p1Word &&
-        p2Word &&
-        currentRound < 5
-    ) {
-
-        await update(
-            roomRef,
-            {
-                round: currentRound + 1
-            }
-        );
-
-    }
-
-}
-
-
-// ======================================================
-// OYUNU BİTİR
-// ======================================================
-
-function finishGame(
-    finalWord1,
-    finalWord2
-) {
-
-    if (!result.classList.contains("hidden")) {
-
-        return;
-
-    }
-
-
-    game.classList.add("hidden");
-
-    result.classList.remove("hidden");
-
-
-    if (
-        finalWord1.toLowerCase() ===
-        finalWord2.toLowerCase()
-    ) {
-
-        resultTitle.textContent =
-            "🎉 KAZANDINIZ!";
-
-        resultText.textContent =
-            `İkiniz de "${finalWord1}" yazdınız.`;
-
-    } else {
-
-        resultTitle.textContent =
-            "❌ KAYBETTİNİZ";
-
-        resultText.textContent =
-            `"${finalWord1}" ≠ "${finalWord2}"`;
-
-    }
-
-}
-
-
-// ======================================================
-// YENİ OYUN
-// ======================================================
-
-newGame.addEventListener(
-    "click",
-    () => {
-
-        location.reload();
-
-    }
-);
+$("submitWord").addEventListener("click",()=>submitCurrentWord(wordInput.value));
+wordInput.addEventListener("keydown",e=>{if(e.key==="Enter")submitCurrentWord(wordInput.value);});
+document.querySelectorAll(".emoji").forEach(b=>b.addEventListener("click",()=>{wordInput.value+=b.dataset.emoji;wordInput.focus();playTone();}));
+
+function calculateScores(r){ let s1=0,s2=0; for(let i=1;i<=5;i++){const a=r.player1.words?.[i],b=r.player2.words?.[i];if(a&&b){if(cleanWord(a)===cleanWord(b)){s1+=10;s2+=10;}else{const la=cleanWord(a).length,lb=cleanWord(b).length; const p= Math.max(1,10-Math.abs(la-lb));s1+=p;s2+=p;}}} return [s1,s2]; }
+async function checkNextRound(){ const snap=await get(ref(db,`rooms/${roomId}`));if(!snap.exists())return;const r=snap.val();const a=r.player1.words?.[currentRound],b=r.player2.words?.[currentRound];if(a&&b&&currentRound<5&&r.round===currentRound)await update(ref(db,`rooms/${roomId}`),{round:currentRound+1}); }
+
+function listenToRoom(){ onValue(ref(db,`rooms/${roomId}`),snap=>{const r=snap.val();if(!r)return; const p1=r.player1||{},p2=r.player2||{};
+ player1Name.textContent=`${p1.name||"Oyuncu 1"} 🧑`;player2Name.textContent=`${p2.name||"Oyuncu 2"} 🧑`; score1.textContent=p1.score??calculateScores(r)[0];score2.textContent=p2.score??calculateScores(r)[1];
+ if(p1.joined&&p2.joined){waiting.classList.add("hidden");game.classList.remove("hidden");waitingText.textContent="Oyun başladı!";}
+ currentRound=r.round||1;roundNumber.textContent=currentRound;const a=p1.words?.[currentRound]||"",b=p2.words?.[currentRound]||"";
+ if(a&&b){words.classList.remove("hidden");word1.textContent=a;word2.textContent=b; if(cleanWord(a)===cleanWord(b)){setStatus("🎯 Aynı kelime! +10 puan");playTone("success");}else setStatus("🔄 Kelimeler farklı. Uzunluk farkına göre puan verildi."); if(currentRound<5){}else finishGame(r);}
+ else if(p1.joined&&p2.joined&&!gameFinished){setStatus(playerNumber===1?"Sıra sende. Kelimeni yaz!":"Sıra sende. Kelimeni yaz!");startTimer();}
+ }); }
+
+function finishGame(r){ if(gameFinished)return;gameFinished=true;stopTimer();game.classList.add("hidden");result.classList.remove("hidden");const [s1,s2]=calculateScores(r);resultTitle.textContent="🎉 Oyun Bitti!";resultText.textContent="5 tur tamamlandı.";finalScores.textContent=`${r.player1.name}: ${s1} puan  •  ${r.player2.name}: ${s2} puan`;playTone("success"); }
+$("newGame").addEventListener("click",()=>location.reload());
+
+const params=new URLSearchParams(location.search);const invited=params.get("room");if(invited){roomInput.value=invited.toUpperCase();setStatus("Arkadaşının odasına katılmak için adını yazıp Oyuna Katıl'a bas.");}
