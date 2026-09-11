@@ -11,12 +11,19 @@
 <main class="app-shell">
   <header class="hero">
     <div class="logo">⚡</div>
-    <div><h1>Kelime Düellosu</h1><p>5 adım. Her adımda 60 saniye. Aynı kelimeyi bul ve kazan!</p></div>
+    <div><h1>Kelime Düellosu</h1><p>Oyuncu sayısını seç, kelimeni gizli gönder ve aynı kelimeyi bul!</p></div>
   </header>
 
   <section id="menu" class="panel">
     <h2>Oyuna Başla</h2>
     <input id="nameInput" maxlength="20" placeholder="Oyuncu adın" autocomplete="name">
+    <label class="field-label" for="playerCount">Oyuncu sayısı</label>
+    <select id="playerCount" class="player-count">
+      <option value="2">👥 2 kişi — 5 adım / 1 dk</option>
+      <option value="3">👥 3 kişi — 8 adım / 1,5 dk</option>
+      <option value="4">👥 4 kişi — 12 adım / 2 dk</option>
+      <option value="5">👥 5 kişi — 15 adım / 2 dk</option>
+    </select>
     <button id="createRoom" class="primary">🎮 Yeni Oda Oluştur</button>
     <div class="divider"><span>veya</span></div>
     <input id="roomInput" maxlength="6" placeholder="6 haneli oda kodu" autocomplete="off">
@@ -25,36 +32,34 @@
 
   <section id="waiting" class="panel hidden">
     <div class="waiting-icon">⏳</div>
-    <h2>Arkadaşını Bekliyorsun</h2>
+    <h2>Oyuncuları Bekliyorsun</h2>
     <p>Oda kodu:</p>
     <div id="roomCodeDisplay" class="room-code"></div>
     <div class="share-actions">
-      <button id="copyRoom">📋 Linki Kopyala</button>
+      <button id="copyRoom">📋 Davet Linkini Kopyala</button>
       <button id="whatsappShare" class="whatsapp">💬 WhatsApp'tan Gönder</button>
     </div>
-    <p id="waitingText" class="muted">Diğer oyuncu bekleniyor...</p>
+    <p id="waitingText" class="muted">Oyuncular bekleniyor...</p>
+    <p class="muted">Oda kodunu veya davet linkini arkadaşlarına gönderebilirsin.</p>
   </section>
 
   <section id="game" class="hidden">
     <div class="game-head panel">
-      <div><span class="eyebrow">ADIM</span><strong><span id="roundNumber">1</span> / 5</strong></div>
+      <div><span class="eyebrow">ADIM</span><strong><span id="roundNumber">1</span> / <span id="roundTotal">5</span></strong></div>
       <div class="timer-box">⏱️ <strong id="timer">60</strong><small> sn</small></div>
-      <div><span class="eyebrow">SKOR</span><strong><span id="score1">0</span> - <span id="score2">0</span></strong></div>
+      <div><span class="eyebrow">OYUNCULAR</span><strong id="playerCountLabel">—</strong></div>
     </div>
 
     <div class="panel players-panel">
       <h3>👥 Oyuncular</h3>
       <table class="status-table">
         <thead><tr><th>Oyuncu</th><th>Durum</th><th>Kelime</th></tr></thead>
-        <tbody>
-          <tr><td id="tableName1">Oyuncu 1</td><td id="tableStatus1">Düşünüyor...</td><td id="tableWord1">—</td></tr>
-          <tr><td id="tableName2">Oyuncu 2</td><td id="tableStatus2">Düşünüyor...</td><td id="tableWord2">—</td></tr>
-        </tbody>
+        <tbody id="playersTable"></tbody>
       </table>
     </div>
 
     <div class="panel input-panel">
-      <div id="turnTitle" class="turn-title">Kelimen ne?</div>
+      <div class="turn-title">Kelimen ne?</div>
       <div id="wordArea" class="word-area">
         <input id="wordInput" maxlength="30" placeholder="Kelimeyi yaz ve gönder..." autocomplete="off">
         <button id="submitWord" class="primary">🚀 Kelimeyi Gönder</button>
@@ -64,16 +69,17 @@
       <div class="emoji-row">
         <button class="emoji" data-emoji="😀">😀</button><button class="emoji" data-emoji="🔥">🔥</button><button class="emoji" data-emoji="😂">😂</button><button class="emoji" data-emoji="❤️">❤️</button><button class="emoji" data-emoji="🎯">🎯</button><button class="emoji" data-emoji="😎">😎</button><button class="emoji" data-emoji="👏">👏</button><button class="emoji" data-emoji="🤔">🤔</button>
       </div>
+      <div class="music-control">
+        <button id="musicToggle">🔇 Müziği Aç</button>
+        <span id="musicStatus">Arka plan müziği kapalı</span>
+      </div>
     </div>
 
     <div id="emojiFeed" class="emoji-feed" aria-live="polite"></div>
 
     <div id="currentWords" class="panel current-words hidden">
       <h3>🔎 Bu Adımın Kelimeleri</h3>
-      <table class="words-table"><tbody>
-        <tr><th id="currentName1">Oyuncu 1</th><td id="word1">—</td></tr>
-        <tr><th id="currentName2">Oyuncu 2</th><td id="word2">—</td></tr>
-      </tbody></table>
+      <table class="words-table"><tbody id="currentWordsBody"></tbody></table>
     </div>
 
     <div class="panel history-panel">
@@ -86,10 +92,15 @@
     <div id="resultBadge" class="result-badge">🎉</div>
     <h2 id="resultTitle"></h2>
     <p id="resultText"></p>
-    <div id="finalScores" class="final-card"></div>
+    <div id="finalResult" class="final-card"></div>
     <button id="newGame" class="primary">🔄 Yeni Oyun</button>
   </section>
 </main>
+
+<!-- Telifli Interstellar soundtrack'i otomatik olarak repoya eklemiyorum. Dosyayı
+     lisanslı/izinli bir ses dosyası olarak "interstellar.mp3" adıyla eklersen
+     aşağıdaki player bunu oyun sırasında çalar. -->
+<audio id="backgroundMusic" loop preload="none" src="interstellar.mp3"></audio>
 <script type="module" src="app.js"></script>
 </body>
 </html>
