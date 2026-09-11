@@ -1,7 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
 import { getDatabase, ref, set, get, onValue, update, push } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-database.js";
 
-const firebaseConfig={apiKey:"AIzaSyBF4A5AGcY0eb5ZsuEiUG-Gg9Vfr119yg",authDomain:"kelime-oyunu-57a0b.firebaseapp.com",databaseURL:"https://kelime-oyunu-57a0b-default-rtdb.firebaseio.com",projectId:"kelime-oyunu-57a0b",storageBucket:"kelime-oyunu-57a0b.firebasestorage.app",messagingSenderId:"580383166978",appId:"1:580383166978:web:f0d428220ab83e33bb4d1b",measurementId:"G-PKEB0K17PX"};
+const firebaseConfig={apiKey:"AIzaSyBF4A5AGcY0eb5ZsuEiUG-GG9vfr119yg",authDomain:"kelime-oyunu-57a0b.firebaseapp.com",databaseURL:"https://kelime-oyunu-57a0b-default-rtdb.firebaseio.com",projectId:"kelime-oyunu-57a0b",storageBucket:"kelime-oyunu-57a0b.firebasestorage.app",messagingSenderId:"580383166978",appId:"1:580383166978:web:f0d428220ab83e33bb4d1b",measurementId:"G-PKEB0K17PX"};
 const db=getDatabase(initializeApp(firebaseConfig));
 let roomId=null,playerNumber=null,currentRound=1,timerInterval=null,gameFinished=false,lastRoundRendered=0;
 const $=id=>document.getElementById(id);
@@ -32,8 +32,8 @@ $("joinRoom").addEventListener("click",()=>{const c=roomInput.value.trim().toUpp
 $("copyRoom").addEventListener("click",async()=>{try{await navigator.clipboard.writeText(roomLink());alert("🔗 Davet linki kopyalandı!");}catch(e){prompt("Davet linkini kopyala:",roomLink());}});
 $("whatsappShare").addEventListener("click",()=>window.open(`https://wa.me/?text=${encodeURIComponent(`⚡ Kelime Düellosu'na katıl!\nOda: ${roomId}\n${roomLink()}`)}`,"_blank"));
 
-// Every submitted word is compared with ALL words already used by ALL players in ALL previous/current steps.
-// The first duplicate ends the game immediately, at the step where it is submitted.
+// A word may never be reused in a different step by any player.
+// Repeating a word within the SAME step is allowed only because it can be the winning match.
 async function submitCurrentWord(rawWord){
   if(gameFinished||!roomId||!playerNumber)return;
   const word=String(rawWord||"").trim(),normalized=normalizeWord(word);
@@ -42,14 +42,15 @@ async function submitCurrentWord(rawWord){
   const r=snap.val();if(r.finished||Number(r.round)!==currentRound)return;
   if(mySubmitted(r)){setStatus("Bu adımda kelimeni zaten gönderdin.");return;}
 
-  // Compare before writing: if this normalized word was used anywhere, this is the success condition.
-  const totalRounds=Number(r.totalRounds||5),totalPlayers=Number(r.maxPlayers||2);
+  // Reject words already used in any PREVIOUS step. This is a rule violation,
+  // not a win: the player must choose another word.
+  const totalPlayers=Number(r.maxPlayers||2);
   for(let p=1;p<=totalPlayers;p++){
     const words=r[`player${p}`]?.words||{};
-    for(let i=1;i<=totalRounds;i++){
+    for(let i=1;i<currentRound;i++){
       if(words[i] && normalizeWord(words[i])===normalized){
-        await update(roomRef,{finished:true,winnerRound:currentRound,matchedWord:word,matchedPlayer:playerNumber,matchedOpponent:p,matchedOpponentRound:i});
-        setStatus("🎯 AYNI KELİME BULUNDU — OYUN BİTTİ!");
+        setStatus("⛔ Bu kelime daha önce kullanıldı. Başka bir kelime seç.");
+        wordInput.focus();
         return;
       }
     }
@@ -67,9 +68,15 @@ document.querySelectorAll(".emoji").forEach(btn=>btn.addEventListener("click",as
 async function checkRound(){
   const snap=await get(ref(db,`rooms/${roomId}`));if(!snap.exists())return;const r=snap.val();
   if(r.finished||Number(r.round)!==currentRound||!allSubmitted(r))return;
-  // Safety check for simultaneous submissions in the same step.
-  const players=getJoinedPlayers(r),seen=new Map();
-  for(const p of players){const raw=p.words?.[currentRound],n=normalizeWord(raw);if(!n)continue;if(seen.has(n)){const other=seen.get(n);await update(ref(db,`rooms/${roomId}`),{finished:true,winnerRound:currentRound,matchedWord:raw,matchedPlayer:other.number,matchedOpponent:p.number,matchedOpponentRound:currentRound});return;}seen.set(n,{number:p.number,word:raw});}
+
+  // Success requires EVERY player to have the SAME normalized word in THIS step.
+  const players=getJoinedPlayers(r),words=players.map(p=>p.words?.[currentRound]).filter(Boolean),normalizedWords=words.map(normalizeWord);
+  if(normalizedWords.length===players.length&&normalizedWords.length>0&&normalizedWords.every(n=>n===normalizedWords[0])){
+    await update(ref(db,`rooms/${roomId}`),{finished:true,winnerRound:currentRound,matchedWord:words[0]});
+    return;
+  }
+
+  // No full match: move to the next step. Words from this step remain permanently used.
   if(currentRound<Number(r.totalRounds||5))await update(ref(db,`rooms/${roomId}`),{round:currentRound+1,roundStartedAt:Date.now()});
   else await update(ref(db,`rooms/${roomId}`),{finished:true,winnerRound:0});
 }
@@ -86,18 +93,16 @@ function finishGame(r){
   if(gameFinished)return;gameFinished=true;stopTimer();game.classList.add("hidden");waiting.classList.add("hidden");result.classList.remove("hidden");
   const total=Number(r.totalRounds||5),players=getJoinedPlayers(r);
   if(r.winnerRound){
-    const pA=Number(r.matchedPlayer||0),pB=Number(r.matchedOpponent||0),roundB=Number(r.matchedOpponentRound||r.winnerRound);
-    const a=r[`player${pA}`]?.words?.[r.winnerRound]||r.matchedWord,b=r[`player${pB}`]?.words?.[roundB]||r.matchedWord;
-    resultBadge.textContent="🎉";resultTitle.textContent="AYNI KELİME BULUNDU — OYUN BİTTİ!";resultText.textContent=`Adım ${r.winnerRound}: Aynı kelime tekrar edildi.`;
-    finalResult.innerHTML=`<div><b>${escapeHtml(r[`player${pA}`]?.name||"Oyuncu")}</b>: ${escapeHtml(a||r.matchedWord||"—")}</div><div><b>${escapeHtml(r[`player${pB}`]?.name||"Oyuncu")}</b>: ${escapeHtml(b||r.matchedWord||"—")}</div>`;playTone("success");
-  }else{resultBadge.textContent="😔";resultTitle.textContent="KELİME BULUNAMADI";resultText.textContent=`${total} adım tamamlandı, hiçbir kelime tekrar edilmedi.`;finalResult.innerHTML=players.map(p=>`<div>${escapeHtml(p.name||"Oyuncu")}: oyun tamamlandı</div>`).join("");playTone("error");}
+    const winningRound=Number(r.winnerRound),sameWord=r.matchedWord||players[0]?.words?.[winningRound]||"—";
+    resultBadge.textContent="🎉";resultTitle.textContent="BAŞARILI! HERKES AYNI KELİMEYİ BULDU!";resultText.textContent=`Adım ${winningRound}: Tüm oyuncular aynı kelimeyi yazdı.`;
+    finalResult.innerHTML=`<div class="winner-word"><b>Kelime:</b> ${escapeHtml(sameWord)}</div>`+players.map(p=>`<div><b>${escapeHtml(p.name||`Oyuncu ${p.number}`)}</b>: ${escapeHtml(p.words?.[winningRound]||sameWord)}</div>`).join("");playTone("success");
+  }else{resultBadge.textContent="😔";resultTitle.textContent="KELİME BULUNAMADI";resultText.textContent=`${total} adım tamamlandı, tüm oyuncuların aynı kelimeyi yazdığı bir adım olmadı.`;finalResult.innerHTML=players.map(p=>`<div>${escapeHtml(p.name||"Oyuncu")}: oyun tamamlandı</div>`).join("");playTone("error");}
 }
 
 function listenToRoom(){
   onValue(ref(db,`rooms/${roomId}`),snap=>{
     const r=snap.val();if(!r)return;window.currentRoom=r;
     const joined=getJoinedPlayers(r),total=Number(r.maxPlayers||2);updateWaitingText(r);
-    // Timer starts only after every selected player has joined.
     if(joined.length===total){waiting.classList.add("hidden");game.classList.remove("hidden");}else{waiting.classList.remove("hidden");game.classList.add("hidden");}
     currentRound=Number(r.round||1);roundNumber.textContent=currentRound;roundTotal.textContent=Number(r.totalRounds||5);
     renderPlayers(r);renderCurrentWords(r);renderHistory(r);updateStatus(r);
