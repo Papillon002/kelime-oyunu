@@ -3,141 +3,73 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
+    <meta name="theme-color" content="#4f46e5">
     <title>Kelime Oyunu</title>
-
     <link rel="stylesheet" href="style.css">
 </head>
-
 <body>
-
 <div class="container">
-
     <h1>🧠 Kelime Oyunu</h1>
 
-    <!-- ANA MENÜ -->
     <div id="menu">
-
-        <p>
-            İki oyuncu 5 tur boyunca kelimelerini birbirine
-            yaklaştırmaya çalışır.
-        </p>
-
-        <button id="createRoom">
-            Oda Oluştur
-        </button>
-
+        <p>İki oyuncu 5 tur boyunca kelimelerini birbirine yaklaştırmaya çalışır.</p>
+        <input type="text" id="nameInput" maxlength="20" placeholder="Adın" autocomplete="name">
+        <button id="createRoom">🎮 Oda Oluştur</button>
         <div class="join-area">
-
-            <input
-                type="text"
-                id="roomInput"
-                placeholder="Oda kodu"
-            >
-
-            <button id="joinRoom">
-                Oyuna Katıl
-            </button>
-
+            <input type="text" id="roomInput" maxlength="6" placeholder="Oda kodu" autocomplete="off">
+            <button id="joinRoom">🚪 Oyuna Katıl</button>
         </div>
-
     </div>
 
-
-    <!-- ODA BEKLEME -->
     <div id="waiting" class="hidden">
-
-        <h2>Oda hazır!</h2>
-
-        <p>Arkadaşına bu kodu gönder:</p>
-
+        <h2>🎉 Oda hazır!</h2>
+        <p>Arkadaşına bu kodu veya linki gönder:</p>
         <div id="roomCodeDisplay"></div>
-
-        <p id="waitingText">
-            Diğer oyuncu bekleniyor...
-        </p>
-
+        <div class="share-actions">
+            <button id="copyRoom">📋 Linki Kopyala</button>
+            <button id="whatsappShare">💬 WhatsApp</button>
+        </div>
+        <p id="waitingText">Diğer oyuncu bekleniyor...</p>
     </div>
 
-
-    <!-- OYUN -->
     <div id="game" class="hidden">
-
-        <div class="game-info">
-
-            <span>
-                Tur:
-                <strong id="roundNumber">1</strong>/5
-            </span>
-
+        <div class="topbar">
+            <span>Tur: <strong id="roundNumber">1</strong>/5</span>
+            <span>⏱️ <strong id="timer">30</strong></span>
+        </div>
+        <div id="players" class="players"></div>
+        <div class="scoreboard">
+            <span>🏆 <strong id="score1">0</strong></span>
+            <span>🏆 <strong id="score2">0</strong></span>
         </div>
 
-
-        <h2 id="playerTitle">
-            Kelimeni yaz
-        </h2>
-
-
+        <h2 id="playerTitle">Kelimeyi yaz</h2>
         <div id="wordArea">
-
-            <input
-                type="text"
-                id="wordInput"
-                placeholder="Bir kelime yaz..."
-                autocomplete="off"
-            >
-
-            <button id="submitWord">
-                Gönder
-            </button>
-
+            <input type="text" id="wordInput" maxlength="30" placeholder="Bir kelime yaz..." autocomplete="off">
+            <button id="submitWord">Gönder 🚀</button>
         </div>
-
-
+        <div class="emoji-row" aria-label="Emoji seç">
+            <button class="emoji" data-emoji="😀">😀</button>
+            <button class="emoji" data-emoji="🔥">🔥</button>
+            <button class="emoji" data-emoji="😂">😂</button>
+            <button class="emoji" data-emoji="❤️">❤️</button>
+            <button class="emoji" data-emoji="🎯">🎯</button>
+        </div>
         <p id="status"></p>
 
-
         <div id="words" class="hidden">
-
-            <div class="word-box">
-
-                <h3>Oyuncu 1</h3>
-
-                <p id="word1">---</p>
-
-            </div>
-
-
-            <div class="word-box">
-
-                <h3>Oyuncu 2</h3>
-
-                <p id="word2">---</p>
-
-            </div>
-
+            <div class="word-box"><h3 id="player1Name">Oyuncu 1</h3><p id="word1">---</p></div>
+            <div class="word-box"><h3 id="player2Name">Oyuncu 2</h3><p id="word2">---</p></div>
         </div>
-
     </div>
 
-
-    <!-- SONUÇ -->
     <div id="result" class="hidden">
-
         <h2 id="resultTitle"></h2>
-
         <p id="resultText"></p>
-
-        <button id="newGame">
-            Yeni Oyun
-        </button>
-
+        <div id="finalScores"></div>
+        <button id="newGame">🔄 Yeni Oyun</button>
     </div>
-
 </div>
-
-
 <script type="module" src="app.js"></script>
-
 </body>
 </html>
