@@ -17,40 +17,49 @@ async function joinRoom(code){
   if(!/^[A-Z0-9]{6}$/.test(clean)){alert("6 haneli oda kodunu gir.");return}
   try{
     const rr=ref(db,`rooms/${clean}`);
+    const snap=await get(rr);
+    if(!snap.exists()){alert("Bu oda bulunamadı.");return}
+    const r=snap.val();
+    if(r.finished){alert("Bu oyun bitmiş.");return}
+
+    const required=Number(r.maxPlayers)||2;
+    let slot=null;
+
     const savedSlot=Number(sessionStorage.getItem(`kelimeRoom:${clean}`));
-    let chosenSlot=null;
-    const tx=await runTransaction(rr,r=>{
-      if(!r)return r;
-      if(r.finished)return r;
-      const required=Number(r.maxPlayers)||2;
-      if(savedSlot>=1&&savedSlot<=required&&r[`player${savedSlot}`]?.sessionId===playerSessionId){
-        chosenSlot=savedSlot;
-      }else{
-        chosenSlot=Array.from({length:required},(_,i)=>i+1).find(i=>!r[`player${i}`]?.joined)||null;
-      }
-      if(!chosenSlot)return r;
-      const key=`player${chosenSlot}`;
-      r[key]={
-        ...(r[key]||{}),
-        joined:true,
-        name:nameInput.value.trim()||r[key]?.name||`Oyuncu ${chosenSlot}`,
-        sessionId:playerSessionId,
-        online:true
-      };
-      return r;
-    });
-    const room=tx.snapshot.val();
-    if(!room){alert("Bu oda bulunamadı.");return}
-    if(room.finished){alert("Bu oyun bitmiş.");return}
-    if(!chosenSlot){alert("Bu oda dolu.");return}
+    if(savedSlot>=1 && savedSlot<=required && r[`player${savedSlot}`]?.sessionId===playerSessionId){
+      slot=savedSlot;
+    }else{
+      slot=Array.from({length:required},(_,i)=>i+1).find(i=>!r[`player${i}`]?.joined)||null;
+    }
+
+    if(!slot){alert("Bu oda dolu.");return}
+
     roomId=clean;
-    playerNumber=chosenSlot;
+    playerNumber=slot;
     gameFinished=false;
-    sessionStorage.setItem(`kelimeRoom:${clean}`,String(chosenSlot));
+
+    await update(ref(db,`rooms/${clean}/player${slot}`),{
+      joined:true,
+      name:nameInput.value.trim()||r[`player${slot}`]?.name||`Oyuncu ${slot}`,
+      sessionId:playerSessionId,
+      online:true
+    });
+
+    const after=await get(rr);
+    const room=after.val();
+    const joinedCount=Array.from({length:required},(_,i)=>Boolean(room?.[`player${i+1}`]?.joined)).filter(Boolean).length;
+
+    if(joinedCount===required && !room?.startedAt){
+      const now=Date.now();
+      await update(rr,{startedAt:now,roundStartedAt:now});
+    }
+
+    sessionStorage.setItem(`kelimeRoom:${clean}`,String(slot));
     try{
-      const od=onDisconnect(ref(db,`rooms/${roomId}/player${chosenSlot}/online`));
+      const od=onDisconnect(ref(db,`rooms/${roomId}/player${slot}/online`));
       await od.set(false)
     }catch{}
+
     listen()
   }catch(e){
     console.error(e);
