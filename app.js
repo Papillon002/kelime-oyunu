@@ -17,38 +17,31 @@ async function joinRoom(code){
   if(!/^[A-Z0-9]{6}$/.test(clean)){alert("6 haneli oda kodunu gir.");return}
   try{
     const rr=ref(db,`rooms/${clean}`);
-    let assignedSlot=null;
-    const name=nameInput.value.trim();
-    const tx=await runTransaction(rr,r=>{
-      if(!r||r.finished)return r;
-      const required=Number(r.maxPlayers)||2;
-      const savedSlot=Number(localStorage.getItem(`kelimeRoom:${clean}`));
-      if(savedSlot>=1&&savedSlot<=required&&r[`player${savedSlot}`]?.sessionId===playerSessionId){
-        assignedSlot=savedSlot;
-      }else{
-        assignedSlot=Array.from({length:required},(_,i)=>i+1).find(i=>!r[`player${i}`]?.joined)||null;
-      }
-      if(!assignedSlot)return r;
-      const key=`player${assignedSlot}`;
-      r[key]={
-        ...(r[key]||{}),
-        joined:true,
-        name:name||r[key]?.name||`Oyuncu ${assignedSlot}`,
-        sessionId:playerSessionId,
-        online:true
-      };
-      return r;
-    });
-    const r=tx.snapshot.val();
-    if(!r){alert("Bu oda bulunamadı.");return}
+    const snap=await get(rr);
+    if(!snap.exists()){alert("Bu oda bulunamadı.");return}
+    const r=snap.val();
     if(r.finished){alert("Bu oyun bitmiş.");return}
-    if(!assignedSlot){alert("Bu oda dolu.");return}
+    const required=Number(r.maxPlayers)||2;
+    const savedSlot=Number(localStorage.getItem(`kelimeRoom:${clean}`));
+    let slot=null;
+    if(savedSlot>=1&&savedSlot<=required&&r[`player${savedSlot}`]?.sessionId===playerSessionId){
+      slot=savedSlot;
+    }else{
+      slot=Array.from({length:required},(_,i)=>i+1).find(i=>!r[`player${i}`]?.joined)||null;
+    }
+    if(!slot){alert("Bu oda dolu.");return}
     roomId=clean;
-    playerNumber=assignedSlot;
+    playerNumber=slot;
     gameFinished=false;
-    localStorage.setItem(`kelimeRoom:${clean}`,String(assignedSlot));
+    await update(ref(db,`rooms/${clean}/player${slot}`),{
+      joined:true,
+      name:nameInput.value.trim()||r[`player${slot}`]?.name||`Oyuncu ${slot}`,
+      sessionId:playerSessionId,
+      online:true
+    });
+    localStorage.setItem(`kelimeRoom:${clean}`,String(slot));
     try{
-      const od=onDisconnect(ref(db,`rooms/${roomId}/player${assignedSlot}/online`));
+      const od=onDisconnect(ref(db,`rooms/${roomId}/player${slot}/online`));
       await od.set(false)
     }catch{}
     listen()
@@ -57,7 +50,7 @@ async function joinRoom(code){
     alert(`Odaya katılınamadı.\n\n${firebaseError(e)}`)
   }
 }
-function startTimer(r){stopTimer();const round=Number(r.round)||1,duration=Number(r.roundDuration)||60,started=Number(r.roundStartedAt)||Date.now();if(gameFinished||r.finished||r[playerPath()]?.words?.[round])return;let prev=duration+1;const tick=()=>{const left=Math.max(0,duration-M.floor((Date.now()-started)/1000));timerEl.textContent=left;timerEl.classList.toggle("timer-warning",left<=10);if(left<=10&&left<prev&&left>0){if(left===10)setStatus("⚠️ SON 10 SANİYE!");tone("warning")}prev=left;if(left<=0){stopTimer();timeoutRound(round)}};tick();timerInterval=setInterval(tick,1000)}
+function startTimer(r){stopTimer();const round=Number(r.round)||1,duration=Number(r.roundDuration)||60,started=Number(r.roundStartedAt)||Date.now();if(gameFinished||r.finished||r[playerPath()]?.words?.[round])return;let prev=duration+1;const tick=()=>{const left=Math.max(0,duration-Math.floor((Date.now()-started)/1000));timerEl.textContent=left;timerEl.classList.toggle("timer-warning",left<=10);if(left<=10&&left<prev&&left>0){if(left===10)setStatus("⚠️ SON 10 SANİYE!");tone("warning")}prev=left;if(left<=0){stopTimer();timeoutRound(round)}};tick();timerInterval=setInterval(tick,1000)}
 async function timeoutRound(round){try{await runTransaction(roomRef(),r=>{if(!r||r.finished||Number(r.round)!==Number(round))return r;if(round<Number(r.totalRounds||5)){r.round=round+1;r.roundStartedAt=Date.now()}else{r.finished=true;r.finishReason="timeout";r.finishedRound=round;r.winnerRound=0}return r})}catch(e){setStatus(firebaseError(e))}}
 async function submitWord(){if(submitting||gameFinished||!roomId)return;const raw=wordInput.value.trim(),norm=normalizeWord(raw);if(!norm){setStatus("✍️ Önce bir kelime yaz.");return}submitting=true;submitButton.disabled=true;wordInput.disabled=true;try{const snap=await get(roomRef());if(!snap.exists())throw Error("Oda bulunamadı.");const r=snap.val(),round=Number(r.round)||1,total=Number(r.totalRounds)||5;if(r.finished)return;if(r[playerPath()]?.words?.[round]){setStatus("✅ Bu adımda zaten kelime gönderdin.");return}for(const p of players(r))for(let i=1;i<=total;i++)if(i!==round&&p.words?.[i]&&normalizeWord(p.words[i])===norm){setStatus("⛔ Bu kelime daha önce kullanıldı.");tone("error");return}const elapsed=Math.max(0,Math.floor((Date.now()-Number(r.roundStartedAt||Date.now()))/1000)),duration=Number(r.roundDuration)||60,remaining=Math.max(0,duration-elapsed),bonus=remaining>=duration*.75?50:remaining>=duration*.5?35:remaining>=duration*.25?20:10,p=r[playerPath()]||{};await set(ref(db,`rooms/${roomId}/${playerPath()}/words/${round}`),raw);await update(ref(db,`rooms/${roomId}/${playerPath()}`),{lastSpeedBonus:bonus,lastSubmitSeconds:elapsed});wordInput.value="";setStatus(`🟢 HAZIR · ⚡ +${bonus} hız bonusu`);tone();await checkRound(round)}catch(e){console.error(e);setStatus(firebaseError(e))}finally{submitting=false;if(!gameFinished){const r=window.currentRoom,nr=Number(r?.round)||currentRound,already=Boolean(r?.[playerPath()]?.words?.[nr]);submitButton.disabled=already;wordInput.disabled=already;if(!already)wordInput.focus()}}}
 async function checkRound(round){await runTransaction(roomRef(),r=>{if(!r||r.finished||Number(r.round)!==Number(round))return r;const ps=joined(r),required=Number(r.maxPlayers)||2;if(ps.length!==required)return r;const submitted=ps.filter(p=>p.words?.[round]);if(submitted.length!==required)return r;const normalized=submitted.map(p=>normalizeWord(p.words[round]));const allSame=normalized.length===required&&normalized[0]&&normalized.every(n=>n===normalized[0]);if(allSame){r.finished=true;r.winnerRound=round;r.finishedRound=round;r.matchedWord=submitted[0].words[round];r.finishReason="all_match";submitted.forEach(p=>{const key=`player${p.number}`,points=100+Number(p.lastSpeedBonus||10),streak=Number(r[key].streak||0)+1;r[key].score=Number(r[key].score||0)+points;r[key].streak=streak;r[key].bestStreak=Math.max(Number(r[key].bestStreak||0),streak);r[key].roundPoints={...(r[key].roundPoints||{}),[round]:points}});return r}submitted.forEach(p=>{const key=`player${p.number}`;r[key].streak=0});if(round<Number(r.totalRounds||5)){r.round=round+1;r.roundStartedAt=Date.now();return r}r.finished=true;r.finishReason="no_match";r.finishedRound=round;r.winnerRound=0;return r})}
@@ -66,5 +59,5 @@ function renderCurrent(r){const ps=joined(r),all=ps.length===Number(r.maxPlayers
 function renderHistory(r){let html="";for(let i=1;i<currentRound;i++){html+=`<div class="history-round"><strong>Adım ${i}</strong>${joined(r).map(p=>`<span>👤 ${esc(p.name)}: <b>${esc(p.words?.[i]||"—")}</b></span>`).join("")}</div>`}historyList.innerHTML=html||"<p class='empty-history'>Henüz tamamlanan bir adım yok.</p>"}
 function showEmoji(x){const e=document.createElement("div");e.className="floating-emoji";e.style.top=`${Math.random()*220}px`;e.innerHTML=`<span>${esc(x.emoji)}</span><small>${esc(x.name)}</small>`;emojiFeed.appendChild(e);setTimeout(()=>e.remove(),4500)}
 function finish(r){if(gameFinished)return;gameFinished=true;stopTimer();game.classList.add("hidden");waiting.classList.add("hidden");result.classList.remove("hidden");const ps=joined(r),fr=Number(r.finishedRound||r.totalRounds||5);if(r.winnerRound){resultBadge.textContent="🎉";resultTitle.textContent="BAŞARILI! TÜM OYUNCULAR AYNI KELİMEYİ BULDU!";resultText.textContent=`Adım ${r.winnerRound}'de tüm oyuncuların kelimesi aynıydı.`;roundStats.textContent=`🏆 ${esc(r.matchedWord)}`;finalResult.innerHTML=ps.map(p=>`<div><b>${esc(p.name)}</b>: ${esc(p.words?.[r.winnerRound]||"—")} · ${Number(p.score||0)} puan</div>`).join("")}else{resultBadge.textContent="😔";resultTitle.textContent="BAŞARISIZ — KELİME BULUNAMADI";resultText.textContent=`Son adım (${fr}) tamamlandı.`;roundStats.textContent=r.finishReason==="timeout"?"⏰ Süre doldu":"🔎 Tüm oyuncular aynı kelimeyi yazmadı";finalResult.innerHTML=`<b>Son Adım ${fr}</b>`+ps.map(p=>`<div>${esc(p.name)}: ${esc(p.words?.[fr]||"Kelime gönderilmedi")} · ${Number(p.score||0)} puan</div>`).join("")}}
-function listen(){if(unsubscribe)unsubscribe();unsubscribe=onValue(roomRef(),rSnap=>{const r=rSnap.val();if(!r)return;window.currentRoom=r;const total=Number(r.maxPlayers)||2,ps=joined(r),readyCount=ps.filter(p=>p.joined).length;if(r.finished){finish(r);return}if(readyCount<total){showWaiting(r)}else{if(!r.startedAt){update(roomRef(),{startedAt:Date.now(),roundStartedAt:Date.now()}).catch(()=>{})}menu.classList.add("hidden");waiting.classList.add("hidden");result.classList.add("hidden");game.classList.remove("hidden");const nr=Number(r.round)||1;currentRound=nr;roundNumber.textContent=nr;roundTotal.textContent=r.totalRounds||5;const mine=r[playerPath()]||{};const already=Boolean(mine.words?.[nr]);wordInput.disabled=already;submitButton.disabled=already;renderPlayers(r);renderCurrent(r);renderHistory(r);if(already){stopTimer();setStatus("🟢 HAZIR · Diğer oyuncular bekleniyor.")}else{setStatus("✍️ Kelimeni yaz ve gönder.");startTimer(r)}}Object.entries(r.emojis||{}).forEach(([id,x])=>{if(!seenEmojiIds.has(id)){seenEmojiIds.add(id);showEmoji(x)}})});}
+function listen(){if(unsubscribe)unsubscribe();unsubscribe=onValue(roomRef(),rSnap=>{const r=rSnap.val();if(!r)return;window.currentRoom=r;const total=Number(r.maxPlayers)||2,ps=joined(r),readyCount=ps.length;if(r.finished){finish(r);return}if(readyCount<total){showWaiting(r)}else{if(!r.startedAt){update(roomRef(),{startedAt:Date.now(),roundStartedAt:Date.now()}).catch(()=>{})}menu.classList.add("hidden");waiting.classList.add("hidden");result.classList.add("hidden");game.classList.remove("hidden");const nr=Number(r.round)||1;currentRound=nr;roundNumber.textContent=nr;roundTotal.textContent=r.totalRounds||5;const mine=r[playerPath()]||{};const already=Boolean(mine.words?.[nr]);wordInput.disabled=already;submitButton.disabled=already;renderPlayers(r);renderCurrent(r);renderHistory(r);if(already){stopTimer();setStatus("🟢 HAZIR · Diğer oyuncular bekleniyor.")}else{setStatus("✍️ Kelimeni yaz ve gönder.");startTimer(r)}}Object.entries(r.emojis||{}).forEach(([id,x])=>{if(!seenEmojiIds.has(id)){seenEmojiIds.add(id);showEmoji(x)}})});}
 $("createRoom")?.addEventListener("click",createRoom);$("joinRoom")?.addEventListener("click",()=>joinRoom(roomInput.value));submitButton?.addEventListener("click",e=>{e.preventDefault();submitWord()});wordInput?.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();submitWord()}});$("copyRoom")?.addEventListener("click",async()=>{try{await navigator.clipboard.writeText(`${location.origin}${location.pathname}?room=${roomId}`);alert("🔗 Davet linki kopyalandı!")}catch{}});$("whatsappShare")?.addEventListener("click",()=>window.open(`https://wa.me/?text=${encodeURIComponent(`Kelime Düellosu'na katıl! Oda: ${roomId} ${location.origin}${location.pathname}?room=${roomId}`)}`,"_blank"));document.querySelectorAll(".emoji").forEach(b=>b.addEventListener("click",async e=>{e.preventDefault();if(!roomId||gameFinished)return;const now=Date.now();emojiTimes=emojiTimes.filter(t=>now-t<1000);if(emojiTimes.length>=5){setStatus("⏳ Emojiler sınırsız ama biraz yavaş 🙂");return}emojiTimes.push(now);try{const p=window.currentRoom?.[playerPath()]||{};const er=push(ref(db,`rooms/${roomId}/emojis`));await set(er,{emoji:b.dataset.emoji,name:p.name||"Oyuncu",timestamp:now});await update(ref(db,`rooms/${roomId}/${playerPath()}`),{emojiCount:Number(p.emojiCount||0)+1})}catch(err){setStatus(firebaseError(err))}}));soundToggle?.addEventListener("click",()=>{soundEnabled=!soundEnabled;localStorage.setItem("kelimeSound",soundEnabled?"on":"off");soundToggle.textContent=soundEnabled?"🔊 Ses Açık":"🔇 Ses Kapalı"});rematchBtn?.addEventListener("click",async()=>{if(!roomId)return;const snap=await get(roomRef());if(!snap.exists())return;const r=snap.val(),u={finished:false,winnerRound:0,matchedWord:null,finishedRound:0,finishReason:null,round:1,roundStartedAt:Date.now(),emojis:{}};for(const p of players(r)){u[`player${p.number}/words`]={};u[`player${p.number}/score`]=0;u[`player${p.number}/streak`]=0;u[`player${p.number}/bestStreak`]=0}gameFinished=false;seenEmojiIds.clear();await update(roomRef(),u);result.classList.add("hidden")});$("newGame")?.addEventListener("click",()=>location.href=location.pathname);const roomParam=new URLSearchParams(location.search).get("room");if(roomParam){roomInput.value=roomParam.toUpperCase();const saved=Number(localStorage.getItem(`kelimeRoom:${roomParam.toUpperCase()}`));if(saved>=1&&saved<=5){roomId=roomParam.toUpperCase();playerNumber=saved;get(roomRef()).then(s=>{if(s.exists()&&s.val()[`player${saved}`]?.sessionId===playerSessionId){update(ref(db,`rooms/${roomId}/player${saved}`),{online:true}).then(()=>listen())}}).catch(()=>{})}}
