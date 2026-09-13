@@ -16,34 +16,41 @@ async function joinRoom(code){
   const clean=String(code||"").trim().toUpperCase();
   if(!/^[A-Z0-9]{6}$/.test(clean)){alert("6 haneli oda kodunu gir.");return}
   try{
-    const rr=ref(db,`rooms/${clean}`),snap=await get(rr);
-    if(!snap.exists()){alert("Bu oda bulunamadı.");return}
-    const r=snap.val();
-    if(r.finished){alert("Bu oyun bitmiş.");return}
-    const required=Number(r.maxPlayers)||2;
-    const savedSlot=Number(localStorage.getItem(`kelimeRoom:${clean}`));
-    let slot=null;
-    if(savedSlot>=1&&savedSlot<=required&&r[`player${savedSlot}`]?.sessionId===playerSessionId){
-      slot=savedSlot;
-    }
-    if(!slot){
-      slot=Array.from({length:required},(_,i)=>i+1).find(i=>!r[`player${i}`]?.joined);
-    }
-    if(!slot){alert("Bu oda dolu.");return}
-    roomId=clean;
-    playerNumber=slot;
-    gameFinished=false;
-    await update(rr,{
-      [`player${slot}/joined`]:true,
-      [`player${slot}/name`]:nameInput.value.trim()||r[`player${slot}`]?.name||`Oyuncu ${slot}`,
-      [`player${slot}/sessionId`]:playerSessionId,
-      [`player${slot}/online`]:true
+    const rr=ref(db,`rooms/${clean}`);
+    let assignedSlot=null;
+    const name=nameInput.value.trim();
+    const tx=await runTransaction(rr,r=>{
+      if(!r||r.finished)return r;
+      const required=Number(r.maxPlayers)||2;
+      const savedSlot=Number(localStorage.getItem(`kelimeRoom:${clean}`));
+      if(savedSlot>=1&&savedSlot<=required&&r[`player${savedSlot}`]?.sessionId===playerSessionId){
+        assignedSlot=savedSlot;
+      }else{
+        assignedSlot=Array.from({length:required},(_,i)=>i+1).find(i=>!r[`player${i}`]?.joined)||null;
+      }
+      if(!assignedSlot)return r;
+      const key=`player${assignedSlot}`;
+      r[key]={
+        ...(r[key]||{}),
+        joined:true,
+        name:name||r[key]?.name||`Oyuncu ${assignedSlot}`,
+        sessionId:playerSessionId,
+        online:true
+      };
+      return r;
     });
+    const r=tx.snapshot.val();
+    if(!r){alert("Bu oda bulunamadı.");return}
+    if(r.finished){alert("Bu oyun bitmiş.");return}
+    if(!assignedSlot){alert("Bu oda dolu.");return}
+    roomId=clean;
+    playerNumber=assignedSlot;
+    gameFinished=false;
+    localStorage.setItem(`kelimeRoom:${clean}`,String(assignedSlot));
     try{
-      const od=onDisconnect(ref(db,`rooms/${roomId}/player${slot}/online`));
+      const od=onDisconnect(ref(db,`rooms/${roomId}/player${assignedSlot}/online`));
       await od.set(false)
     }catch{}
-    localStorage.setItem(`kelimeRoom:${clean}`,String(slot));
     listen()
   }catch(e){
     console.error(e);
