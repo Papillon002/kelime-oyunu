@@ -20,14 +20,15 @@ async function joinRoom(code){
     const savedSlot=Number(sessionStorage.getItem(`kelimeRoom:${clean}`));
     let chosenSlot=null;
     const tx=await runTransaction(rr,r=>{
-      if(!r||r.finished)return;
+      if(!r)return r;
+      if(r.finished)return r;
       const required=Number(r.maxPlayers)||2;
       if(savedSlot>=1&&savedSlot<=required&&r[`player${savedSlot}`]?.sessionId===playerSessionId){
         chosenSlot=savedSlot;
       }else{
         chosenSlot=Array.from({length:required},(_,i)=>i+1).find(i=>!r[`player${i}`]?.joined)||null;
       }
-      if(!chosenSlot)return;
+      if(!chosenSlot)return r;
       const key=`player${chosenSlot}`;
       r[key]={
         ...(r[key]||{}),
@@ -39,7 +40,8 @@ async function joinRoom(code){
       return r;
     });
     const room=tx.snapshot.val();
-    if(!room){alert("Bu oda bulunamadı veya oda dolu.");return}
+    if(!room){alert("Bu oda bulunamadı.");return}
+    if(room.finished){alert("Bu oyun bitmiş.");return}
     if(!chosenSlot){alert("Bu oda dolu.");return}
     roomId=clean;
     playerNumber=chosenSlot;
@@ -49,7 +51,6 @@ async function joinRoom(code){
       const od=onDisconnect(ref(db,`rooms/${roomId}/player${chosenSlot}/online`));
       await od.set(false)
     }catch{}
-    showWaiting(room);
     listen()
   }catch(e){
     console.error(e);
